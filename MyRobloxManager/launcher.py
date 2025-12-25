@@ -4,10 +4,8 @@ import subprocess
 import os
 
 class RobloxLauncher:
-    def __init__(self, cookie, account_name=None):
+    def __init__(self, cookie):
         self.cookie = cookie
-        # Account Name for saving cookie / 帳號名稱 (用於存檔)
-        self.account_name = account_name 
         self.session = requests.Session()
         self.session.cookies['.ROBLOSECURITY'] = cookie
         self.headers = {
@@ -15,45 +13,20 @@ class RobloxLauncher:
             'Referer': 'https://www.roblox.com/'
         }
 
-    def _update_env_cookie(self, new_cookie):
-        """ Write new cookie to .env file / 將新 Cookie 寫回 .env """
-        if not self.account_name:
-            return
-
-        env_path = ".env"
-        if not os.path.exists(env_path):
-            return
-
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-
-            with open(env_path, "w", encoding="utf-8") as f:
-                for line in lines:
-                    # Find and replace the specific account line / 找到並替換對應帳號行
-                    if line.startswith(f"{self.account_name}="):
-                        f.write(f"{self.account_name}={new_cookie}\n")
-                        print(f"[{self.account_name}] Cookie Refreshed & Saved!")
-                    else:
-                        f.write(line)
-        except Exception as e:
-            print(f"Failed to save new cookie: {e}")
-
-    def _check_and_refresh_cookie(self, response):
-        """ Check if response contains a new cookie / 檢查回應是否有新 Cookie """
-        # Roblox sends new cookie in Set-Cookie header / Roblox 在 Header 回傳新 Cookie
-        new_cookie = response.cookies.get(".ROBLOSECURITY")
-        if new_cookie and new_cookie != self.cookie:
-            self.cookie = new_cookie
-            self._update_env_cookie(new_cookie)
-
     def _kill_mutex(self):
+        """
+        Use handle64.exe to kill the Roblox singleton mutex/event.
+        使用 handle64.exe 強制關閉 Roblox 的單例互斥鎖/事件。
+        """
         tool = "handle64.exe"
         if not os.path.exists(tool):
-            print("Error: handle64.exe not found.")
+            print("Error: handle64.exe not found. / 錯誤: 找不到 handle64.exe")
             return
 
+        # Target handle name
+        # 目標 Handle 名稱
         target_name = "ROBLOX_singletonEvent"
+
         print(f"Scanning for {target_name}...")
         
         try:
@@ -65,6 +38,7 @@ class RobloxLauncher:
                 [tool, "-a", "singleton", "-nobanner"], 
                 startupinfo=startupinfo
             )
+            # Decode using utf-8 / 使用 utf-8 解碼
             output = output_bytes.decode('utf-8', errors='ignore')
 
             for line in output.splitlines():
@@ -79,6 +53,7 @@ class RobloxLauncher:
                         handle_hex = None
                         for part in parts:
                             if part.endswith(":") and part.lower() not in ["pid:", "type:"]:
+                                # Check if next part is a path / 檢查下一個部分是否為路徑
                                 current_idx = parts.index(part)
                                 if current_idx + 1 < len(parts) and parts[current_idx + 1].startswith("\\"):
                                     handle_hex = part.replace(":", "")
@@ -95,21 +70,18 @@ class RobloxLauncher:
                             time.sleep(0.1)
 
                     except Exception as e:
-                        print(f"Parse Error: {e}")
+                        print(f"Parse Error / 解析錯誤: {e}")
 
         except subprocess.CalledProcessError:
             pass # No lock found is normal / 沒找到鎖是正常的
         except Exception as e:
-            print(f"Scan Failed: {e}")
+            print(f"Scan Failed / 掃描失敗: {e}")
 
     def _get_csrf_token(self):
         try:
-            # Trigger request to check for new cookie / 發送請求以檢查新 Cookie
+            # Send logout request to get CSRF token
+            # 發送請求獲取 CSRF Token
             response = self.session.post('https://auth.roblox.com/v2/logout', headers=self.headers)
-            
-            # Check for refresh / 檢查刷新
-            self._check_and_refresh_cookie(response)
-            
             if 'x-csrf-token' in response.headers:
                 return response.headers['x-csrf-token']
         except:
@@ -122,7 +94,7 @@ class RobloxLauncher:
         
         csrf = self._get_csrf_token()
         if not csrf:
-            return "Error: Invalid Cookie"
+            return "Error: Invalid Cookie / 錯誤: Cookie 無效"
 
         self.headers['X-CSRF-TOKEN'] = csrf
         self.headers['Origin'] = 'https://www.roblox.com'
@@ -131,14 +103,10 @@ class RobloxLauncher:
             auth_url = "https://auth.roblox.com/v1/authentication-ticket"
             post_data = {"gameId": "12345"}
             resp = self.session.post(auth_url, headers=self.headers, json=post_data)
-            
-            # Check for refresh again / 再次檢查刷新
-            self._check_and_refresh_cookie(resp)
-            
             ticket = resp.headers.get('rbx-authentication-ticket')
             
             if not ticket:
-                return f"Error: No Ticket ({resp.status_code})"
+                return f"Error: No Ticket / 錯誤: 無票券 ({resp.status_code})"
 
             browser_tracker_id = int(time.time() * 1000)
             launch_url = (
@@ -151,11 +119,12 @@ class RobloxLauncher:
             print(f"Launching to ID: {place_id}...")
             subprocess.Popen(['start', launch_url], shell=True)
 
-            # Wait 3s and kill again / 等待 3 秒再殺一次
+            # Wait 3s and kill again to ensure multi-instance works
+            # 啟動後等待 3 秒再殺一次，確保多開功能正常
             time.sleep(3)
             self._kill_mutex()
             
-            return "Launch Command Sent"
+            return "Launch Command Sent / 啟動指令已發送"
             
         except Exception as e:
-            return f"Exception: {e}"
+            return f"Exception / 例外: {e}"
