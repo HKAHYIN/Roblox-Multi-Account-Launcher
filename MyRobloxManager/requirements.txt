@@ -1,0 +1,5 @@
+customtkinter
+selenium
+webdriver-manager
+requests
+pywin32

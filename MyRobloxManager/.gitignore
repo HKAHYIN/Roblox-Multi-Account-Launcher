@@ -1,0 +1,39 @@
+# --- Sensitive Data ---
+accounts.json
+config.json
+*.log
+*.enc
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# --- VS Code / IDE ---
+.vscode/
+.idea/
+
+# --- Build / PyInstaller ---
+build/
+dist/
+*.spec
+manifest/
+
+# --- Roblox Local Data ---
+RobloxCookies.dat
+versions/
+
+# --- Security Keys ---
+*.key
+
+# --- Executable ---
+*.exe
+
+# --- OS Junk (Windows/Mac) ---
+Thumbs.db
+Desktop.ini
+.DS_Store
