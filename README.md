@@ -33,4 +33,4 @@ GNU GPLv3 License.
 Multi-Instance Logic inspired by evanovar
 
 ## 🛡️ Disclaimer
-This software is open-source and virus-free; if you have security concerns, you are encouraged to review the code and compile the executable yourself using: pyinstaller --noconsole --onefile main.py
+This software is open-source and virus-free; if you have security concerns, you are encouraged to review the code and compile the executable yourself using: `pyinstaller --noconsole --onefile main.py`
