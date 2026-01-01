@@ -3,3 +3,4 @@ selenium
 webdriver-manager
 requests
 pywin32
+cryptography

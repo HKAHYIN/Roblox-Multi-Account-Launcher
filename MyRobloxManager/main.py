@@ -1,153 +1,193 @@
 import customtkinter as ctk
-import threading
-import time
-from tkinter import messagebox, simpledialog
 from auth_manager import AuthManager
 from launcher import RobloxLauncher
+import threading
+from tkinter import messagebox
+import time
+import logging
+import os
+import sys
 
-ctk.set_appearance_mode("Dark")
+# 1. Determine the REAL folder where the .exe or script is located
+if getattr(sys, 'frozen', False):
+    # If running as compiled EXE
+    application_path = os.path.dirname(sys.executable)
+else:
+    # If running as Python script
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Set log file path to that real folder
+log_file_path = os.path.join(application_path, 'debug.log')
+
+logging.basicConfig(
+    filename=log_file_path,
+    level=logging.DEBUG,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    filemode='w',
+    encoding='utf-8'
+)
+
+# SILENCE NOISY LIBRARIES
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("selenium").setLevel(logging.WARNING)
+logging.getLogger("WDM").setLevel(logging.WARNING)
+
+# Print location to console
+print(f"DEBUG: Log file is being saved to: {log_file_path}")
+logging.info(f"Application Started. Running in: {application_path}")
+
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Roblox Manager Pro")
-        self.geometry("850x600")
+        self.title("Roblox Multi-Instance Manager")
+        self.geometry("600x500")
         
-        self.auth = AuthManager()
+        logging.info("Initializing UI...")
         
-        # --- Authentication Check ---
-        if self.auth.state == "SETUP_REQUIRED":
-            self.show_setup_dialog()
-        elif self.auth.state == "LOCKED":
-            self.show_unlock_dialog()
-            
-        if self.auth.state != "READY":
-            self.destroy()
+        try:
+            self.auth = AuthManager()
+            self.launcher = RobloxLauncher()
+        except Exception as e:
+            logging.critical(f"Init Error: {e}", exc_info=True)
+            messagebox.showerror("Error", f"Failed to initialize: {e}")
             return
 
-        # --- Main App ---
-        self.launcher = RobloxLauncher()
-        self.build_ui()
-
-    def show_setup_dialog(self):
-        """Ask new user about encryption."""
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Security Setup")
-        dialog.geometry("400x300")
-        dialog.attributes("-topmost", True)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         
-        # Modal blocking
-        dialog.grab_set()
-        
-        ctk.CTkLabel(dialog, text="Welcome!", font=("Arial", 20, "bold")).pack(pady=10)
-        ctk.CTkLabel(dialog, text="Do you want to encrypt your account data?\nThis requires a password to open the app.", 
-                     wraplength=350).pack(pady=10)
+        self.main_container = ctk.CTkFrame(self)
+        self.main_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        def enable_enc():
-            pwd = ctk.CTkInputDialog(text="Create a Password:", title="Set Password").get_input()
-            if pwd:
-                self.auth.setup_new(password=pwd)
-                dialog.destroy()
-            else:
-                pass # User cancelled password input
+        # Check Auth State (Password / Setup / Ready)
+        self.check_auth_state()
 
-        def disable_enc():
-            self.auth.setup_new(password=None)
-            dialog.destroy()
+    def check_auth_state(self):
+        # Clear current frame
+        for widget in self.main_container.winfo_children():
+            widget.destroy()
 
-        ctk.CTkButton(dialog, text="Enable Encryption (Recommended)", fg_color="green", command=enable_enc).pack(pady=10)
-        ctk.CTkButton(dialog, text="No Encryption (Plain Text)", fg_color="gray", command=disable_enc).pack(pady=10)
-        
-        self.wait_window(dialog)
+        if self.auth.state == "LOCKED":
+            self.show_password_screen()
+        elif self.auth.state == "SETUP_REQUIRED":
+            self.show_setup_screen()
+        else:
+            self.show_dashboard()
 
-    def show_unlock_dialog(self):
-        """Ask for password."""
-        while True:
-            pwd = ctk.CTkInputDialog(text="Enter Password to Unlock:", title="Encrypted Storage").get_input()
-            if pwd is None: # Cancelled
-                self.auth.state = "EXIT"
-                break
-            
-            if self.auth.unlock(pwd):
-                break
-            else:
-                messagebox.showerror("Error", "Wrong Password!")
+    # UI: PASSWORD SCREEN
+    def show_password_screen(self):
+        ctk.CTkLabel(self.main_container, text="Vault Locked", font=("Arial", 20)).pack(pady=20)
+        
+        self.pass_entry = ctk.CTkEntry(self.main_container, placeholder_text="Enter Password", show="*")
+        self.pass_entry.pack(pady=10)
+        
+        ctk.CTkButton(self.main_container, text="Unlock", command=self.unlock_vault).pack(pady=10)
 
-    def build_ui(self):
-        # Top Bar
-        self.top_frame = ctk.CTkFrame(self)
-        self.top_frame.pack(fill="x", padx=10, pady=10)
-        
-        # Input Mode
-        self.mode_var = ctk.StringVar(value="place")
-        ctk.CTkRadioButton(self.top_frame, text="Place ID", variable=self.mode_var, value="place").pack(side="left", padx=5)
-        ctk.CTkRadioButton(self.top_frame, text="Username", variable=self.mode_var, value="user").pack(side="left", padx=5)
-        
-        self.input_entry = ctk.CTkEntry(self.top_frame, placeholder_text="ID or Username", width=200)
-        self.input_entry.insert(0, "116405044285330")
-        self.input_entry.pack(side="left", padx=10)
-        
-        # Buttons
-        ctk.CTkButton(self.top_frame, text="Add Account", command=self.start_add_account).pack(side="right", padx=5)
-        ctk.CTkButton(self.top_frame, text="Launch All", fg_color="green", command=self.launch_all).pack(side="right", padx=5)
+    def unlock_vault(self):
+        pwd = self.pass_entry.get()
+        if self.auth.unlock(pwd):
+            self.check_auth_state() # Refresh to Dashboard
+        else:
+            messagebox.showerror("Error", "Invalid Password")
 
-        # List
-        self.scroll = ctk.CTkScrollableFrame(self, label_text="Your Accounts")
-        self.scroll.pack(fill="both", expand=True, padx=10, pady=10)
+    # UI: SETUP SCREEN
+    def show_setup_screen(self):
+        ctk.CTkLabel(self.main_container, text="Welcome! Create a Password?", font=("Arial", 18)).pack(pady=20)
         
-        self.status_lbl = ctk.CTkLabel(self, text="Ready", text_color="gray")
+        self.new_pass = ctk.CTkEntry(self.main_container, placeholder_text="New Password (Optional)", show="*")
+        self.new_pass.pack(pady=10)
+        
+        ctk.CTkButton(self.main_container, text="Initialize", command=self.do_setup).pack(pady=10)
+
+    def do_setup(self):
+        pwd = self.new_pass.get()
+        self.auth.setup_new(pwd if pwd else None)
+        self.check_auth_state()
+
+    # UI: MAIN DASHBOARD
+    def show_dashboard(self):
+        self.label = ctk.CTkLabel(self.main_container, text="Roblox Account Manager", font=("Arial", 20, "bold"))
+        self.label.pack(pady=10)
+
+        self.status_lbl = ctk.CTkLabel(self.main_container, text="Status: Ready", text_color="green")
         self.status_lbl.pack(pady=5)
-        
+
+        # Input for Place ID / User ID
+        self.input_entry = ctk.CTkEntry(self.main_container, placeholder_text="Place ID / Username")
+        self.input_entry.pack(pady=5)
+        self.input_entry.insert(0, "116405044285330") 
+
+        # Mode Selection
+        self.mode_var = ctk.StringVar(value="place")
+        self.mode_switch = ctk.CTkSwitch(self.main_container, text="Username Mode", variable=self.mode_var, onvalue="user", offvalue="place")
+        self.mode_switch.pack(pady=5)
+
+        # Buttons
+        self.add_btn = ctk.CTkButton(self.main_container, text="Add Account", command=self.add_account_thread)
+        self.add_btn.pack(pady=5)
+
+        self.launch_all_btn = ctk.CTkButton(self.main_container, text="Launch All", fg_color="red", command=self.launch_all)
+        self.launch_all_btn.pack(pady=5)
+
+        # Account List
+        self.account_list = ctk.CTkScrollableFrame(self.main_container, height=200)
+        self.account_list.pack(fill="x", pady=10)
         self.refresh_list()
 
     def refresh_list(self):
-        for w in self.scroll.winfo_children(): w.destroy()
-            
+        for widget in self.account_list.winfo_children():
+            widget.destroy()
+
         if not self.auth.accounts:
-            ctk.CTkLabel(self.scroll, text="No accounts.").pack(pady=20)
+            ctk.CTkLabel(self.account_list, text="No accounts.").pack()
             return
 
-        for name, data in self.auth.accounts.items():
-            row = ctk.CTkFrame(self.scroll)
-            row.pack(fill="x", pady=5)
-            ctk.CTkLabel(row, text=name, font=("Arial", 14, "bold"), width=150, anchor="w").pack(side="left", padx=10)
-            ctk.CTkButton(row, text="X", width=40, fg_color="#FF5555", hover_color="#CC0000",
-                          command=lambda n=name: self.confirm_delete(n)).pack(side="right", padx=5)
-            ctk.CTkButton(row, text="Launch", width=80, 
+        for username, data in self.auth.accounts.items():
+            f = ctk.CTkFrame(self.account_list)
+            f.pack(fill="x", pady=2)
+            
+            ctk.CTkLabel(f, text=username, width=100, anchor="w").pack(side="left", padx=5)
+            
+            ctk.CTkButton(f, text="Launch", width=60, 
                           command=lambda c=data['cookie']: self.launch_one(c)).pack(side="right", padx=5)
+            
+            ctk.CTkButton(f, text="X", width=30, fg_color="gray",
+                          command=lambda u=username: self.delete_account(u)).pack(side="right", padx=2)
 
-    def confirm_delete(self, name):
-        if messagebox.askyesno("Delete", f"Remove {name}?"):
-            self.auth.delete_account(name)
+    def delete_account(self, username):
+        if self.auth.delete_account(username):
             self.refresh_list()
 
-    def start_add_account(self):
-        self.status_lbl.configure(text="Login in browser...", text_color="yellow")
-        threading.Thread(target=self._add_account_thread).start()
-        
-    def _add_account_thread(self):
-        res = self.auth.add_account_via_browser()
-        self.status_lbl.configure(text=res, text_color="white")
+    def add_account_thread(self):
+        threading.Thread(target=self.add_account_logic, daemon=True).start()
+
+    def add_account_logic(self):
+        self.status_lbl.configure(text="Status: Browser Opening...", text_color="orange")
+        result = self.auth.add_account_via_browser()
+        self.status_lbl.configure(text=f"Status: {result}", text_color="white")
         self.after(0, self.refresh_list)
 
     def launch_one(self, cookie):
         val = self.input_entry.get()
         mode = self.mode_var.get()
+        logging.info(f"Launching one. Mode: {mode}")
         threading.Thread(target=lambda: self.status_lbl.configure(text=self.launcher.launch_account(cookie, val, mode))).start()
 
     def launch_all(self):
         val = self.input_entry.get()
         mode = self.mode_var.get()
+        logging.info("Launching ALL.")
         def _run():
             for name, data in self.auth.accounts.items():
+                self.status_lbl.configure(text=f"Launching {name}...")
                 self.launcher.launch_account(data['cookie'], val, mode)
                 time.sleep(6)
             self.status_lbl.configure(text="All Launched")
         threading.Thread(target=_run).start()
 
 if __name__ == "__main__":
-    app = App()
     try:
+        app = App()
         app.mainloop()
-    except Exception:
-        pass
+    except Exception as e:
+        logging.critical("App Crashed", exc_info=True)
